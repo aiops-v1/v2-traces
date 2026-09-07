@@ -209,6 +209,108 @@
       "description": "Grouped by (method, route) together, not route alone � POST /expenses/ and GET /expenses/ can have very different latency profiles (a write that hits the DB vs a cached-ish read), and collapsing them into one /expenses/ line would hide that. Three separate panels, one per percentile, rather than three lines on one panel � easier to read when method+route pushes the legend past a handful of entries."
     },
     {
+      "id": 24,
+      "type": "timeseries",
+      "title": "p50 request duration (overall)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50 (all routes)",
+          "exemplar": true,
+          "refId": "A"
+        }
+      ],
+      "description": "No method/route split, deliberately — the by-route row above answers \"which route is slow\"; this row answers \"is the backend as a whole inside its SLO target,\" the same aggregate sli:latency:p99_seconds_rate1h and the LatencyP99High alert watch, just over this dashboard's shorter [5m] window instead of slo-rules.yml's [1h]/[30d]."
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "p95 request duration (overall)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 (all routes)",
+          "exemplar": true,
+          "refId": "A"
+        }
+      ],
+      "description": "No method/route split, deliberately — the by-route row above answers \"which route is slow\"; this row answers \"is the backend as a whole inside its SLO target,\" the same aggregate sli:latency:p99_seconds_rate1h and the LatencyP99High alert watch, just over this dashboard's shorter [5m] window instead of slo-rules.yml's [1h]/[30d]."
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "p99 request duration (overall)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99 (all routes)",
+          "exemplar": true,
+          "refId": "A"
+        }
+      ],
+      "description": "The single number the SLO alert (LatencyP99High) and sli:latency:p99_seconds_rate1h actually watch — one line, no method/route split. The three panels above answer \"which route is slow\"; this one answers \"is the backend, as a whole, inside its 200ms target\" — the same question slo-rules.yml's recording rule and the SLO dashboard's own latency panel ask, just over this dashboard's shorter [5m] window instead of slo-rules.yml's [1h]/[30d]."
+    },
+    {
       "id": 101,
       "type": "row",
       "title": "Business metrics",
@@ -216,7 +318,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 25
       }
     },
     {
@@ -227,7 +329,7 @@
         "h": 6,
         "w": 4,
         "x": 0,
-        "y": 18
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -253,7 +355,7 @@
         "h": 6,
         "w": 4,
         "x": 4,
-        "y": 18
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -279,7 +381,7 @@
         "h": 6,
         "w": 4,
         "x": 8,
-        "y": 18
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -305,7 +407,7 @@
         "h": 6,
         "w": 4,
         "x": 12,
-        "y": 18
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -338,7 +440,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 18
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -370,7 +472,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 32
       }
     },
     {
@@ -381,7 +483,7 @@
         "h": 6,
         "w": 4,
         "x": 0,
-        "y": 25
+        "y": 33
       },
       "datasource": {
         "type": "prometheus",
@@ -440,7 +542,7 @@
         "h": 6,
         "w": 10,
         "x": 4,
-        "y": 25
+        "y": 33
       },
       "datasource": {
         "type": "prometheus",
@@ -474,7 +576,7 @@
         "h": 6,
         "w": 10,
         "x": 14,
-        "y": 25
+        "y": 33
       },
       "datasource": {
         "type": "prometheus",
@@ -506,7 +608,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 39
       }
     },
     {
@@ -517,7 +619,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 32
+        "y": 40
       },
       "datasource": {
         "type": "prometheus",
@@ -549,7 +651,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 32
+        "y": 40
       },
       "datasource": {
         "type": "prometheus",
@@ -581,7 +683,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 47
       }
     },
     {
@@ -592,7 +694,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 40
+        "y": 48
       },
       "datasource": {
         "type": "prometheus",
@@ -626,7 +728,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 40
+        "y": 48
       },
       "datasource": {
         "type": "prometheus",
@@ -660,7 +762,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 40
+        "y": 48
       },
       "datasource": {
         "type": "prometheus",
@@ -692,7 +794,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 56
       },
       "datasource": {
         "type": "prometheus",
@@ -724,7 +826,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 64
       }
     },
     {
@@ -735,7 +837,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 65
       },
       "datasource": {
         "type": "prometheus",
@@ -837,7 +939,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 73
       }
     },
     {
@@ -848,7 +950,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 74
       },
       "datasource": {
         "type": "prometheus",
@@ -935,7 +1037,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 82
       }
     },
     {
@@ -947,7 +1049,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 83
       },
       "datasource": {
         "type": "prometheus",
