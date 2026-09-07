@@ -1,0 +1,29 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'info@joindevops.com'
+  smtp_auth_username: 'info@joindevops.com'
+  # Real secrets never live in this file — see ./secrets/README.md.
+  # Confirmed field names against Prometheus's own Alertmanager
+  # configuration reference, not guessed: smtp_auth_password_file and
+  # api_url_file (below) are both real, documented alternatives to putting
+  # the secret inline as smtp_auth_password / api_url.
+  smtp_auth_password_file: /etc/alertmanager/secrets/smtp_password
+  smtp_require_tls: true
+
+route:
+  receiver: 'email-and-slack'
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 3h
+
+receivers:
+  - name: 'email-and-slack'
+    email_configs:
+      - to: 'm.sivakmrreddy@gmail.com'
+        send_resolved: true
+    slack_configs:
+      - channel: '#grafana-alerts-2'
+        api_url_file: /etc/alertmanager/secrets/slack_webhook_url
+        send_resolved: true

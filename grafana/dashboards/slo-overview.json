@@ -1,0 +1,241 @@
+{
+  "id": null,
+  "uid": "v2-slo-overview",
+  "title": "Expense Tracker — v2 SLO & Burn Rate",
+  "tags": ["expense-tracker", "v2-traces"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    { "id": 100, "type": "row", "title": "Error budget & burn rate", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Availability error budget remaining (30d window, 99.5% SLO / 99% SLA)",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "max": 100,
+          "min": -50,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "green", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(sli:availability:ratio_rate30d - 0.995) / (1 - 0.995) * 100",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "SLO alert states (slo-burn-rate-alerts.yml only — see README on why this differs from the metrics dashboard's alert table)",
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "alertstate" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "pending": { "color": "yellow" }, "firing": { "color": "red" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "Value": true, "__name__": true },
+            "indexByName": { "alertname": 0, "alertstate": 1, "severity": 2, "slo": 3 }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "ALERTS{slo=~\".+\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Availability burn rate — 1h window, vs the 14x alert threshold",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 14 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(1 - sli:availability:ratio_rate1h) / 0.005",
+          "legendFormat": "burn rate (1h)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Availability burn rate — 30d window, vs the 14x alert threshold",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 14 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(1 - sli:availability:ratio_rate30d) / 0.005",
+          "legendFormat": "burn rate (30d)",
+          "refId": "A"
+        }
+      ]
+    },
+
+    { "id": 101, "type": "row", "title": "Availability SLI — the raw ratio the burn rate above is computed from (SLO target: 99.5%, SLA: 99%)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 } },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Availability SLI — 1h window",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0.9, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sli:availability:ratio_rate1h",
+          "legendFormat": "1h",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Availability SLI — 30d window",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0.9, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sli:availability:ratio_rate30d",
+          "legendFormat": "30d",
+          "refId": "A"
+        }
+      ]
+    },
+
+    { "id": 102, "type": "row", "title": "Latency SLI — estimated p99, aggregated across every route (SLO target: 200ms)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 } },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Latency SLI — 1h window",
+      "description": "One aggregate number across every route — it can tell you THAT p99 is over target, not WHICH endpoint. See the alert's own description for the worst-offending route at fire time, or the metrics dashboard's per-method+route p50/p95/p99 panels to look it up yourself.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sli:latency:p99_seconds_rate1h",
+          "legendFormat": "1h",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Latency SLI — 30d window",
+      "description": "One aggregate number across every route — it can tell you THAT p99 is over target, not WHICH endpoint. See the alert's own description for the worst-offending route at fire time, or the metrics dashboard's per-method+route p50/p95/p99 panels to look it up yourself.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sli:latency:p99_seconds_rate30d",
+          "legendFormat": "30d",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

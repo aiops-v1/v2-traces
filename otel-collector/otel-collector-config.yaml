@@ -1,0 +1,50 @@
+# Single ingestion point for every signal in this stack (see
+# expense-backend-v1.2/src/tracing.js's own comment) — right now that's just
+# traces, from two sources: the backend's Node SDK (OTLP/HTTP, port 4318 —
+# tracing.js's own default) and nginx's ngx_otel_module (OTLP/gRPC, port
+# 4317 — that module only speaks gRPC, no HTTP option). Both protocols are
+# enabled on the same otlp receiver for exactly that reason, not redundancy.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batches spans before export instead of sending each one individually —
+  # the default thresholds (200ms / 8192 spans, whichever comes first) are
+  # already sane for a stack this size, so nothing below overrides them.
+  batch: {}
+
+exporters:
+  otlp:
+    endpoint: tempo:4317
+    tls:
+      # Plain HTTP between containers on this stack's own internal Docker
+      # network, same trust boundary every other inter-service call here
+      # already assumes (e.g. backend -> mysql, prometheus -> every scrape
+      # target) — not a production TLS posture, a teaching-stack one.
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
+  # Self-metrics (otelcol_* — e.g. otelcol_receiver_accepted_spans,
+  # otelcol_exporter_send_failed_spans) default to Prometheus exposition on
+  # 127.0.0.1:8888 with no telemetry block at all — loopback-only, i.e.
+  # invisible to another container even on this same Docker network.
+  # Rebinding to 0.0.0.0 here is what makes prometheus/prometheus.yml's new
+  # otel-collector scrape job actually able to reach it.
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: '0.0.0.0'
+                port: 8888

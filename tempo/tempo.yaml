@@ -1,0 +1,37 @@
+# Deliberately NOT the metrics_generator/remote_write setup shown in Tempo's
+# own docker-compose examples (span-metrics/service-graphs derived FROM
+# traces, written back to Prometheus). That bridge runs the opposite
+# direction from this stack's own Bridge #2 (see
+# expense-backend-v1.2/src/metrics.js): the backend already emits its own
+# RED metrics directly via prom-client, with a real trace_id exemplar on
+# every observation, so Tempo deriving a second, parallel set of the same
+# metrics from spans would be redundant — one bridge, not two.
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "tempo:4317"
+        http:
+          endpoint: "tempo:4318"
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+compactor:
+  compaction:
+    # No named volume backs /var/tempo (see docker-compose.yml) — this data
+    # doesn't survive a container recreation anyway, so retention here is
+    # just about disk use between recreations, not a real requirement.
+    block_retention: 48h
+
+usage_report:
+  reporting_enabled: false

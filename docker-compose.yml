@@ -1,0 +1,259 @@
+services:
+  mysql:
+    build: ../expense-mysql-v1
+    container_name: expense-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: expense_tracker
+      MYSQL_USER: expense_app
+      MYSQL_PASSWORD: devpass
+    volumes:
+      - expense_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ../expense-backend-v1.2
+    container_name: backend
+    environment:
+      PORT: 4000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: expense_app
+      DB_PASSWORD: devpass
+      DB_NAME: expense_tracker
+      DB_POOL_SIZE: 10
+      JWT_SECRET: change-me-to-a-long-random-string
+      JWT_EXPIRES_IN: 7d
+      FRONTEND_ORIGIN: http://localhost
+      AUTH_MODE: cookie
+      # ENABLE_TRACING is unset here — tracing.js's own default is on, and
+      # this stage (unlike v1-metrics) actually has an otel-collector for it
+      # to export to. OTEL_EXPORTER_OTLP_ENDPOINT is also left at tracing.js's
+      # own default (http://otel-collector:4318), which already matches this
+      # file's otel-collector service name below.
+    depends_on:
+      mysql:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  frontend:
+    build: ../expense-frontend-v1.2
+    container_name: frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - otel-collector
+
+  # --- Metrics collection ---
+
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.15.1
+    container_name: mysqld-exporter
+    # v0.15.x dropped DATA_SOURCE_NAME support — credentials come from a
+    # mounted my.cnf file instead (see ./mysqld-exporter/.my.cnf). The
+    # metrics_exporter DB user itself is provisioned by expense-mysql-v1's
+    # own migrations, not anything in this compose file.
+    command:
+      - --config.my-cnf=/etc/mysqld-exporter/.my.cnf
+    volumes:
+      - ./mysqld-exporter/.my.cnf:/etc/mysqld-exporter/.my.cnf:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.3.0
+    container_name: nginx-exporter
+    command:
+      - --nginx.scrape-uri=http://frontend:8080/stub_status
+    depends_on:
+      - frontend
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node-exporter
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    privileged: true
+    # Docker >=20.10 gives containers a private cgroup namespace by default on
+    # cgroup v2 hosts. Without this, cadvisor only ever sees its own isolated
+    # view of the cgroup tree and can't enumerate sibling containers at all.
+    cgroup: host
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      # This host's Docker runs with the containerd-snapshotter storage
+      # backend (confirmed live: `docker info --format '{{.Driver}}'`
+      # reports "overlayfs", not the classic "overlay2" — the tell that
+      # containerd, not Docker's own graphdriver, owns image/container
+      # storage). Under that backend, /var/lib/docker/image/ never gets the
+      # image/overlay2/layerdb/mounts/<id>/mount-id files cAdvisor's Docker
+      # container handler reads directly off disk — so every real container
+      # cAdvisor finds fails with "failed to identify the read-write layer
+      # ID," no matter the cAdvisor version, since that metadata format
+      # simply doesn't exist under this backend. Pointing cAdvisor at
+      # containerd's own socket instead (below) reads container state via
+      # containerd's API rather than parsing Docker's internal files, which
+      # sidesteps the broken path entirely.
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
+      # Deliberately NOT mounting /var/run:/var/run:ro here (a common cAdvisor
+      # example mount, and present in an earlier version of this file).
+      # /var/run/docker.sock lives under it, and on a host where that socket
+      # is reachable, cAdvisor's Docker factory registers itself alongside the
+      # containerd one above and immediately hits the exact same
+      # "failed to identify the read-write layer ID" error for every real
+      # container — this backend breaks the Docker factory outright regardless
+      # of which other factory is also configured. Confirmed live: on one
+      # deploy of this stack the Docker factory silently found no socket and
+      # never registered (clean logs); on a second, fresh EC2 host it did find
+      # one and produced this exact duplicate failure per container. Cutting
+      # off socket access is what actually makes Docker-factory registration
+      # fail cleanly and deterministically (logged once, non-fatal) instead of
+      # depending on host-specific luck, leaving the containerd factory below
+      # as the only one in play.
+    command:
+      - --containerd=/run/containerd/containerd.sock
+      # Docker's own embedded containerd instance namespaces everything it
+      # manages under "moby" — confirmed against containerd's own
+      # documentation, not guessed. cAdvisor's default ("k8s.io") is aimed
+      # at Kubernetes nodes, where the container runtime's containerd
+      # instance is namespaced for CRI instead; pointed at a plain Docker
+      # host, that default would connect successfully and still see zero
+      # containers, a quieter failure mode than the one this replaces.
+      - --containerd-namespace=moby
+      # Confirmed live, worth knowing before reading the metrics dashboard's
+      # container CPU/memory panels: containerd identifies containers by
+      # their raw ID, not Docker's human-readable --name — the "name" label
+      # cadvisor now emits for these containers is that raw ID, not
+      # "backend"/"frontend"/"mysql". Those panels filter on the "image"
+      # label instead (still legible), see this stage's own README for the
+      # full explanation.
+    depends_on:
+      - backend
+      - frontend
+      - mysql
+
+  # --- Tracing: nginx and the backend each export spans (OTLP/gRPC and
+  # OTLP/HTTP respectively) to this Collector, which forwards both to Tempo.
+  # A single ingestion point for every signal in this stack, not just a
+  # relay — see expense-backend-v1.2/src/tracing.js's own comment on why.
+  otel-collector:
+    image: otel/opentelemetry-collector:0.160.0
+    container_name: otel-collector
+    command:
+      - --config=/etc/otel-collector-config.yaml
+    volumes:
+      - ./otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    depends_on:
+      - tempo
+
+  # No host ports published for otel-collector/tempo, same reasoning as
+  # mysqld-exporter/nginx-exporter/node-exporter/cadvisor above: nothing on
+  # this host's public IP needs to reach them directly, only Grafana does,
+  # and Grafana is already exposed.
+  tempo:
+    image: grafana/tempo:3.0.3
+    container_name: tempo
+    command:
+      - -target=all
+      - -config.file=/etc/tempo.yaml
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo.yaml:ro
+      # No named volume, deliberately — same call prometheus's own /prometheus
+      # makes below: this is a teaching stack's trace data, not anything
+      # meant to survive a container recreation.
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --web.console.templates=/etc/prometheus/consoles
+      # Default retention is 15d — too short for slo-rules.yml's 30-day
+      # window (rate([30d]) would silently lose its oldest data mid-window
+      # otherwise). No named volume backs /prometheus (see the volumes:
+      # section below), so this data doesn't survive a container recreation
+      # anyway — 35d costs nothing extra in practice, just headroom over 30d.
+      - --storage.tsdb.retention.time=35d
+      # Exemplars are stored in memory only (not on the TSDB block format),
+      # capped by --storage.exemplars.exemplars-limit (default 100000) — this
+      # is what actually makes Prometheus keep the trace_id exemplar that
+      # ships on every http_request_duration_seconds observation
+      # (expense-backend-v1.2/src/metrics.js) instead of silently dropping
+      # it, exposition format and scrape support notwithstanding.
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - ./prometheus/slo-rules.yml:/etc/prometheus/slo-rules.yml:ro
+      - ./prometheus/slo-burn-rate-alerts.yml:/etc/prometheus/slo-burn-rate-alerts.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - frontend
+      - mysqld-exporter
+      - nginx-exporter
+      - node-exporter
+      - cadvisor
+      - alertmanager
+
+  # --- Alerting: Prometheus evaluates alert-rules.yml, Alertmanager routes
+  # firing alerts to email + Slack. See ./alertmanager/secrets/README.md
+  # for the one-time setup (Gmail app password, Slack incoming webhook) —
+  # neither secret lives in this file or in alertmanager.yml itself.
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - tempo
+
+volumes:
+  expense_mysql_data:
+
+networks:
+  default:
+    name: expense-v2-traces-net

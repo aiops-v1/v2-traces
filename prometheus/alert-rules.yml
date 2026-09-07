@@ -1,0 +1,79 @@
+groups:
+  - name: expense-tracker-basic-alerts
+    rules:
+      # The most basic alert Prometheus can express: a target's own `up`
+      # went to 0. Note what this does and doesn't tell you — see the
+      # dashboard's "up ≠ healthy" panel and README for why this alert
+      # firing is a *narrower* claim than "the service is broken."
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.job }} on {{ $labels.instance }} is down'
+          description: >-
+            Prometheus has failed to scrape {{ $labels.job }}
+            ({{ $labels.instance }}) for at least 1 minute.
+
+      # mysqld_exporter's own gauge, distinct from Prometheus's up{job="mysql"}
+      # — this one means "mysqld_exporter reached MySQL and it answered,"
+      # not just "the exporter process itself is reachable."
+      - alert: MySQLDown
+        expr: mysql_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'MySQL is unreachable from mysqld_exporter'
+          description: >-
+            mysql_up has been 0 for at least 1 minute — mysqld_exporter
+            can't reach MySQL, or MySQL itself is down.
+
+      # A plain percentage threshold, not an error budget — the point here
+      # is "Prometheus can alert on a ratio of two counters," not SLO math.
+      - alert: Backend5xxRateHigh
+        expr: >-
+          (sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m]))) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Backend 5xx error rate above 5%'
+          description: >-
+            {{ $value | humanizePercentage }} of requests in the last 5m
+            returned a 5xx status code.
+
+      - alert: BackendLatencyP95High
+        expr: >-
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Backend p95 latency above 1s'
+          description: 'p95 request duration has been above 1s for 5 minutes.'
+
+      - alert: HostCPUHigh
+        expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Host CPU above 80%'
+          description: 'Host CPU busy % has been above 80% for 5 minutes.'
+
+      # Framed as usage%, not available% like the dashboard's memory panel —
+      # deliberately: "more than 70% used" is the natural way to state this
+      # threshold, and used% is just 100 minus the dashboard's available%
+      # (same two node_exporter gauges, read the other way round).
+      - alert: HostMemoryHigh
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 70
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Host memory usage above 70%'
+          description: 'Host memory usage has been above 70% for 5 minutes.'

@@ -1,0 +1,95 @@
+global:
+  scrape_interval: 15s
+
+# alert-rules.yml: introductory, single-condition threshold alerts
+# (up==0, error-rate %, p95 latency, host CPU/memory). slo-rules.yml: SLI
+# recording rules (availability + latency ratios). slo-burn-rate-alerts.yml:
+# multi-window burn-rate alerts built on those SLIs — a bigger conceptual
+# jump than a plain threshold, but the same three tools (Prometheus,
+# Alertmanager, Grafana) doing it, so it lives here too rather than in a
+# separate stage. See ../alertmanager/ for where a Firing alert actually
+# goes (email + Slack).
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+  - /etc/prometheus/slo-rules.yml
+  - /etc/prometheus/slo-burn-rate-alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: 'expense-backend'
+    static_configs:
+      - targets: ['backend:4000']
+        labels:
+          tier: backend
+
+  - job_name: 'mysql'
+    static_configs:
+      - targets: ['mysqld-exporter:9104']
+        labels:
+          tier: mysql
+
+  - job_name: 'nginx-frontend'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+        labels:
+          tier: frontend
+
+  # nginx-module-vts, scraped straight from nginx itself — adds
+  # request-duration histograms and per-status-code counts, which
+  # stub_status (the job above) has no concept of at all. Used by the
+  # metrics dashboard's "nginx vs backend latency" panel only — the SLO
+  # layer (slo-rules.yml) is backend-only. Confirmed against the module's
+  # own source, not guessed: the path is /status/format/prometheus, and it
+  # emits a host="*" all-vhosts-combined pseudo-series alongside the real
+  # per-vhost one — every query against this job filters host!="*" for
+  # exactly that reason.
+  - job_name: 'nginx-vts'
+    static_configs:
+      - targets: ['frontend:8080']
+        labels:
+          tier: frontend
+    metrics_path: /status/format/prometheus
+
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          tier: host
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          tier: infra
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          tier: infra
+
+  # otelcol_* self-metrics — confirmed against the Collector's own docs, not
+  # guessed: with no telemetry.metrics.readers config at all, the Collector
+  # exposes these on 127.0.0.1:8888 (loopback-only, unreachable from here),
+  # which is why otel-collector-config.yaml's telemetry block rebinds it to
+  # 0.0.0.0 first. Same reasoning as every other job here — this is what
+  # lets InstanceDown (alert-rules.yml) cover the Collector too, not just
+  # the app and its exporters.
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8888']
+        labels:
+          tier: tracing
+
+  # Tempo serves /metrics on its own main HTTP port by default (no separate
+  # metrics port needed, unlike the Collector above) — confirmed against
+  # Tempo's own docs.
+  - job_name: 'tempo'
+    static_configs:
+      - targets: ['tempo:3200']
+        labels:
+          tier: tracing

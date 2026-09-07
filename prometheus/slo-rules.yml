@@ -1,0 +1,55 @@
+# SLIs (Service Level Indicators) as recording rules — pre-computed ratios,
+# cheap to query repeatedly from Grafana/alerting rules instead of
+# recomputing the same rate()/histogram_quantile() math on every read.
+#
+# Backend-only. There is no nginx-side SLI here — nginx-module-vts metrics
+# exist and work (see the metrics dashboard's "nginx vs backend latency"
+# panel), but folding them into a second, parallel SLI layer made this
+# section harder to read than it needed to be, for a comparison that isn't
+# the point of an SLO in the first place. One number, one source, one
+# thing to reason about.
+#
+# SLA vs SLO (availability only — see below): the SLA (99%, the
+# external/contractual promise) is deliberately looser than the SLO (99.5%,
+# the internal target this stack actually alerts on). The gap between them
+# is the safety margin — breaching the SLO is the early warning that gives
+# you room to fix things before the SLA itself is at risk. Nothing in this
+# file references 99% directly for that reason: every alert and every
+# error-budget calculation below is against the SLO (0.995), not the SLA.
+#
+# 30-day period, split into two windows: sli:*_rate1h (short, reactive) and
+# sli:*_rate30d (long, matches the SLO's own accounting period — also what
+# the error-budget-remaining panel reads). See slo-burn-rate-alerts.yml's
+# own comments for the real caveat on pairing a short window with the full
+# period instead of a shorter "confirmation" window.
+#
+# Split into two rule groups, not one, so the expensive part isn't paying
+# for a freshness it doesn't need: a 30-day ratio genuinely doesn't change
+# meaningfully between one 15s tick and the next, so it's evaluated every
+# 5m instead — the 1h ratio still gets a much shorter interval since that's
+# the one actually meant to react quickly.
+groups:
+  - name: expense-tracker-slis-fast
+    interval: 30s
+    rules:
+      # Availability SLI: fraction of requests that were NOT a 5xx.
+      - record: sli:availability:ratio_rate1h
+        expr: >-
+          sum(rate(http_requests_total{status_code!~"5.."}[1h]))
+            / sum(rate(http_requests_total[1h]))
+
+      # Latency SLI: estimated p99 request duration, in seconds. SLO target
+      # is 200ms (0.2) — set directly in slo-burn-rate-alerts.yml, no SLA
+      # number alongside it this time, just the one target.
+      - record: sli:latency:p99_seconds_rate1h
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[1h])) by (le))
+
+  - name: expense-tracker-slis-slow
+    interval: 5m
+    rules:
+      - record: sli:availability:ratio_rate30d
+        expr: >-
+          sum(rate(http_requests_total{status_code!~"5.."}[30d]))
+            / sum(rate(http_requests_total[30d]))
+      - record: sli:latency:p99_seconds_rate30d
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[30d])) by (le))

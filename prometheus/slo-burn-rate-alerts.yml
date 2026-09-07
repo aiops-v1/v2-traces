@@ -1,0 +1,79 @@
+# SLO burn-rate alerting — distinct from alert-rules.yml's plain
+# thresholds. Fires on "we're consuming error budget too fast to last the
+# 30-day period," not "a number crossed a fixed line."
+#
+# Backend-only (see slo-rules.yml) — both alerts below read sli:availability:*
+# and sli:latency:* directly, no nginx involved.
+#
+# SLO targets (only defined here, nowhere else — everything below derives
+# from these numbers):
+#   Availability: 99.5% of requests non-5xx  -> error budget = 1 - 0.995 = 0.005
+#                 (99% is the separate, looser SLA — see slo-rules.yml)
+#   Latency:      p99 <= 200ms
+# Both measured over a 30-day rolling period.
+#
+# Windows: 1h (short, reactive) AND 30d (long — the SLO's own period).
+# Real caveat, not glossed over: the textbook multi-window burn-rate
+# pattern (Google's SRE workbook) pairs the short window with a long
+# window that's *still much shorter than the full SLO period* (e.g. 5m+1h,
+# or 30m+6h) specifically so the long window stays sensitive to a
+# recent-but-real incident. Pairing with the literal full period (1h+30d
+# here) makes the 30d side behave like the error-budget-remaining number
+# itself — on a Prometheus instance with weeks of real accumulated traffic,
+# a short, sharp incident barely moves a 30-day ratio, so this pair would
+# be far less sensitive than the classic pattern. It behaves fine on THIS
+# stack specifically because Prometheus's data directory isn't on a named
+# volume (docker-compose.yml) — recreating the `prometheus` container
+# wipes its TSDB, so a fresh teaching session has little to no accumulated
+# history diluting the 30d window, and a deliberately-injected fault moves
+# it almost as fast as it moves the 1h window.
+groups:
+  - name: expense-tracker-slo-burn-rate
+    rules:
+      - alert: AvailabilitySLOBurnRate
+        expr: >-
+          (
+            (1 - sli:availability:ratio_rate1h) / 0.005 > 14
+            and
+            (1 - sli:availability:ratio_rate30d) / 0.005 > 14
+          )
+        for: 2m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: 'Availability SLO: burning error budget 14x too fast'
+          description: >-
+            At a sustained 14x burn rate, the 30-day error budget would be
+            exhausted in about 51 hours (30d / 14) — needs attention now.
+
+      # A direct p99 threshold, not burn-rate math like the alert above —
+      # there's no le="0.2" bucket boundary to read an exact "% of requests
+      # under 200ms" off of the way availability reads an exact "% non-5xx",
+      # so there's no clean way to express this as a good/bad ratio and
+      # divide by an error budget. Still requires both windows to agree,
+      # for the same noisy-vs-stable reasoning as the burn-rate alert above.
+      - alert: LatencyP99High
+        expr: >-
+          (
+            sli:latency:p99_seconds_rate1h > 0.2
+            and
+            sli:latency:p99_seconds_rate30d > 0.2
+          )
+        for: 2m
+        labels:
+          severity: page
+          slo: latency
+        annotations:
+          summary: 'Latency SLO: p99 above the 200ms target'
+          # sli:latency:p99_seconds_rate1h is a single aggregate number
+          # across every route — on its own it can't say *which* endpoint is
+          # slow. This runs a second, one-off query at alert-fire time
+          # (Prometheus's own `query` template function, evaluated when the
+          # alert notification is rendered, not a recording rule) to name
+          # the actual worst offender instead of leaving the reader to go
+          # find it themselves in Grafana.
+          description: >-
+            Estimated backend p99 request duration has been above 200ms on
+            both the 1h and 30d windows. Slowest endpoint right now:
+            {{ with query "topk(1, histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[1h])) by (le, method, route)))" }}{{ range . }}{{ .Labels.method }} {{ .Labels.route }} (p99 {{ .Value | humanizeDuration }}){{ end }}{{ else }}unknown — no per-route data available{{ end }}.

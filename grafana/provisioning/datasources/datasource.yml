@@ -1,0 +1,30 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # This is the metrics-side half of Bridge #2 (see
+      # expense-backend-v1.2/src/metrics.js): the backend already attaches a
+      # real trace_id as an exemplar on every http_request_duration_seconds
+      # observation, and Prometheus already stores it (see
+      # ../../prometheus/prometheus.yml's --enable-feature=exemplar-storage).
+      # This is the piece that was still missing — telling Grafana which
+      # datasource a trace_id exemplar actually points to, so the little
+      # diamond marks on the p50/p95/p99 panels become clickable jumps into
+      # Tempo instead of inert dots.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
