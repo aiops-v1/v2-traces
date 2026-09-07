@@ -26,12 +26,14 @@ storage:
     local:
       path: /var/tempo/blocks
 
-compactor:
-  compaction:
-    # No named volume backs /var/tempo (see docker-compose.yml) — this data
-    # doesn't survive a container recreation anyway, so retention here is
-    # just about disk use between recreations, not a real requirement.
-    block_retention: 48h
+# No compactor: block, deliberately — Tempo 3.0 removed it as a standalone
+# top-level config section (confirmed against grafana/tempo's own 2.x->3.0
+# migration example: its single-binary config doesn't set one either).
+# Setting it here is what crashed this container: "field compactor not found
+# in type app.Config". Whatever Tempo 3.0's built-in default retention is
+# applies instead — moot anyway, since no named volume backs /var/tempo (see
+# docker-compose.yml), so this data doesn't survive a container recreation
+# regardless of any retention setting.
 
 usage_report:
   reporting_enabled: false
