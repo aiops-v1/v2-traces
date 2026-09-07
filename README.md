@@ -148,19 +148,33 @@ SLO latency alert for why: `BCRYPT_ROUNDS = 12` in
 `expense-backend-v1.2/src/routes/auth.js`), and click it. That jumps
 straight into the one real trace behind that one data point.
 
-### What that trace actually shows — and doesn't
-Opening the signup trace, the backend span for `POST /auth/signup` is
-long, but its *own* child spans (the mysql `INSERT`) are short — most of
-the span's duration is unaccounted for by any child span at all. That gap
-is `bcrypt.hash()` running: CPU-bound, synchronous, and not a library
-`getNodeAutoInstrumentations()` knows how to instrument, so it never gets a
-span of its own. This is worth naming as a real, general limitation, not a
-gap in this particular setup: a trace only shows you time spent *inside
-instrumented libraries* (HTTP calls, DB queries, and similar). Time spent
-in your own application code — a slow loop, a heavy computation, bcrypt —
-shows up only as silence between spans. Reading that silence correctly
-("something happened here, in code the tracer doesn't see automatically")
-is as much a skill as reading the spans themselves.
+### What that trace actually shows — and the one manual span in this codebase
+Opening the signup trace, the backend span for `POST /auth/signup` is long,
+but its *own* auto-instrumented child spans (the mysql `SELECT`/`INSERT`)
+only account for a few milliseconds of it. Confirmed live on a real trace:
+365ms handler span, ~8.7ms of that in the two mysql spans, leaving ~356ms
+with nothing under it at all — `bcrypt.hash()` running: CPU-bound,
+synchronous, and not a library `getNodeAutoInstrumentations()` knows how to
+instrument, so it never gets a span of its own automatically. This is worth
+naming as a real, general limitation before working around it: a trace only
+shows you time spent *inside instrumented libraries* (HTTP calls, DB
+queries, and similar) unless something tells it otherwise. Time spent in
+your own application code — a slow loop, a heavy computation, bcrypt — is
+invisible by default.
+
+`expense-backend-v1.2/src/routes/auth.js` closes that specific gap —
+deliberately the *only* manual span in this codebase, everywhere else being
+auto-instrumented is the whole point. `withBcryptSpan()` wraps both
+`bcrypt.hash()` (signup) and `bcrypt.compare()` (signin) in
+`tracer.startActiveSpan()` from `@opentelemetry/api` directly — the same API
+`getNodeAutoInstrumentations()` itself is built on, just called by hand
+instead of via a patched library. Opening a fresh signup trace now shows a
+`bcrypt.hash` span, sitting as a sibling to the mysql spans under the route
+handler, carrying a `bcrypt.rounds: 12` attribute — the silence is a span
+now, not a gap you have to reason your way into. This is the general pattern
+for closing this exact kind of blind spot anywhere else it shows up: wrap
+the suspect code in a span by hand, since auto-instrumentation only ever
+covers what it already knows about.
 
 ### A preview of the logs stage, already running
 `expense-backend-v1.2`'s log lines already carry `trace_id`/`span_id` on
